@@ -1,11 +1,16 @@
 [project]
 name = "dash-cyto-demo"
-authors = [{name = "Christian Fobel", email = "christian@fobel.net"}]
+authors = [{ name = "Christian Fobel", email = "christian@fobel.net" }]
 requires-python = ">= 3.11"
 version = "0.1.0"
 readme = "README.md"
-license = {text = "MIT"}
-dependencies = [ "dash>=2.18.2,<3", "dash-cytoscape>=1.0.2,<2"]
+license = { text = "MIT" }
+dependencies = [
+    "dash-cytoscape>=1.0.2,<2",
+    "dash>=2.18.2,<3",
+    "networkx>=3.4.2,<4",
+    "typer>=0.15.2,<0.16",
+]
 
 [build-system]
 build-backend = "hatchling.build"
