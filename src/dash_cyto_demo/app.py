@@ -1,22 +1,13 @@
 """A Dash Cytoscape demonstration with Typer CLI."""
 
-import functools
-import json
 import logging
-import random
 from pathlib import Path
 
-import dash
-import dash_cytoscape as cyto
-import networkx as nx
 import typer
-from dash import html, dcc
-from dash.dependencies import Input, Output, State
-from networkx.readwrite import cytoscape_data
-from networkx.readwrite.json_graph import node_link_data, node_link_graph
 
-# Load extra Cytoscape.js layouts
-cyto.load_extra_layouts()
+# Import from our refactored modules
+from .graph_generator import generate_sample_graph
+from .dashboard import run_dashboard
 
 # Set up logging
 logging.basicConfig(
@@ -26,31 +17,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize the Typer app
 app_cli = typer.Typer(pretty_exceptions_show_locals=False)
-
-# Create partial functions with explicit edges parameter to avoid deprecation warnings
-node_link_data_with_links = functools.partial(node_link_data, edges="links")
-node_link_graph_with_links = functools.partial(node_link_graph, edges="links")
-
-def get_graph_info(G):
-    """
-    Get information about a graph as a string.
-
-    Parameters
-    ----------
-    G : networkx.Graph
-        The graph to get information about
-
-    Returns
-    -------
-    str
-        String containing graph information
-    """
-    return (
-        f"Type: {type(G).__name__}, "
-        f"Nodes: {G.number_of_nodes()}, "
-        f"Edges: {G.number_of_edges()}"
-    )
-
 
 @app_cli.command()
 def generate_sample_graph(
@@ -76,67 +42,14 @@ def generate_sample_graph(
     Creates a graph with the specified number of nodes and random edges,
     with properties that can be visualized in Dash Cytoscape.
     """
-    if seed is not None:
-        random.seed(seed)
-
-    # Create a directed or undirected graph
-    if directed:
-        G = nx.DiGraph()
-    else:
-        G = nx.Graph()
-
-    # Add nodes with properties
-    for i in range(nodes):
-        # Generate some sample node properties
-        node_properties = {
-            "label": f"Node {i}",
-            "size": random.randint(1, 10),
-            "importance": random.uniform(0, 1),
-            "category": random.choice(["A", "B", "C"]),
-        }
-        G.add_node(i, **node_properties)
-
-    # Add random edges
-    for i in range(nodes):
-        # Determine number of edges for this node (0 to max_edges)
-        num_edges = random.randint(0, min(max_edges, nodes - 1))
-
-        # Get possible targets (excluding self-loops)
-        possible_targets = list(range(nodes))
-        possible_targets.remove(i)
-
-        if num_edges > 0:
-            # Select random targets
-            targets = random.sample(
-                possible_targets, min(num_edges, len(possible_targets))
-            )
-
-            for target in targets:
-                # Generate some sample edge properties
-                edge_properties = {
-                    "label": f"e{i}-{target}",
-                    "weight": random.uniform(0.1, 5.0),
-                    "type": random.choice(["solid", "dashed", "dotted"]),
-                }
-                G.add_edge(i, target, **edge_properties)
-
-    # Serialize the graph to JSON using our partial function with explicit edges parameter
-    data = node_link_data_with_links(G)
-
-    # Create output directory if it doesn't exist
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Save to file
-    with open(output_path, "w") as f:
-        json.dump(data, f, indent=2)
-
-    logger.info(
-        f"Generated graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges"
+    from .graph_generator import generate_sample_graph as gen_graph
+    return gen_graph(
+        output_path=output_path,
+        nodes=nodes,
+        max_edges=max_edges,
+        directed=directed,
+        seed=seed
     )
-    logger.info(f"Graph saved to {output_path}")
-    logger.info(f"Graph info: {get_graph_info(G)}")
-
-    return G
 
 
 @app_cli.command()
@@ -152,6 +65,7 @@ def run_dashboard(
     port: int = typer.Option(8050, "--port", "-p", help="Port to run the server on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to run the server on"),
     layout: str = typer.Option("circle", "--layout", "-l", help="Initial Cytoscape layout algorithm"),
+    color_by: str = typer.Option(None, "--color-by", "-c", help="Node attribute to use for categorical coloring"),
 ):
     """
     Run Dash Cytoscape network visualization dashboard from a NetworkX graph.
@@ -159,203 +73,15 @@ def run_dashboard(
     This loads a NetworkX graph from a JSON file and visualizes it using Dash Cytoscape.
     All node and edge properties from the NetworkX graph are preserved in the visualization.
     """
-    # Load NetworkX graph from JSON
-    logger.info(f"Loading graph from {graph_path}")
-    try:
-        with open(graph_path, "r") as f:
-            graph_data = json.load(f)
-        # Use the partial function with explicit edges parameter
-        graph = node_link_graph_with_links(graph_data)
-        logger.info(f"Graph loaded: {get_graph_info(graph)}")
-    except Exception as e:
-        logger.error(f"Failed to load graph: {e}")
-        raise typer.Exit(1)
-
-    # Convert NetworkX graph to Cytoscape format using built-in function
-    cyto_data = cytoscape_data(graph)
-
-    # Log node and edge properties to demonstrate preservation
-    for node in cyto_data["elements"]["nodes"]:
-        logger.info(f"Node {node['data'].get('id')} properties: {node['data']}")
-
-    for edge in cyto_data["elements"].get("edges", []):
-        logger.info(
-            f"Edge {edge['data'].get('source')}->{edge['data'].get('target')} properties: {edge['data']}"
-        )
-
-    # Extract elements list for Cytoscape
-    elements = []
-    elements.extend(cyto_data["elements"]["nodes"])
-    if "edges" in cyto_data["elements"]:
-        elements.extend(cyto_data["elements"]["edges"])
-
-    # Define basic stylesheet for the network
-    stylesheet = [
-        # Style for all nodes
-        {
-            "selector": "node",
-            "style": {
-                "background-color": "#6272A3",  # Node background color
-                "label": "data(label)",  # Use the 'label' field as the node text
-                "width": 30,  # Node width
-                "height": 30,  # Node height
-                "text-valign": "center",  # Vertical alignment of label
-                "text-halign": "center",  # Horizontal alignment of label
-                "color": "white",  # Label text color
-            },
-        },
-        # Style for selected nodes
-        {
-            "selector": "node:selected",
-            "style": {
-                "background-color": "#FF7700",  # Highlight color for selected nodes
-                "border-width": 3,
-                "border-color": "#FFD700",  # Gold border for selected nodes
-                "width": 40,  # Make selected nodes slightly larger
-                "height": 40,
-                "text-outline-color": "#000000",  # Text outline for better visibility
-                "text-outline-width": 1,
-                "font-size": 14,  # Larger font for selected nodes
-                "z-index": 10,  # Bring selected nodes to front
-            },
-        },
-        # Style for all edges
-        {
-            "selector": "edge",
-            "style": {
-                "width": 2,  # Edge width
-                "line-color": "#A3627C",  # Edge color
-                "target-arrow-color": "#A3627C",  # Arrow color
-                "target-arrow-shape": "triangle",  # Arrow shape
-                "curve-style": "bezier",  # Edge curve style
-                "label": "data(label)",  # Use the 'label' field for the edge text
-                "text-rotation": "autorotate",  # Auto-rotate text to follow edge
-                "text-margin-y": -10,  # Text margin
-                "color": "#555",  # Text color
-            },
-        },
-        # Style for edges connected to selected nodes
-        {
-            "selector": "node:selected ~ edge, edge[source = 'node:selected'], edge[target = 'node:selected']",
-            "style": {
-                "width": 3,  # Thicker edges for connections to selected nodes
-                "line-color": "#FFB6C1",  # Different color for edges connected to selected nodes
-                "target-arrow-color": "#FFB6C1",
-                "opacity": 1,  # Full opacity for selected connections
-            },
-        },
-    ]
-
-    # Available layouts in Cytoscape.js (including extra layouts loaded with cyto.load_extra_layouts())
-    available_layouts = [
-        # Default layouts
-        "circle", "grid", "random", "concentric",
-        "breadthfirst", "cose", "null",
-        # Extra layouts (require cyto.load_extra_layouts())
-        "dagre", "klay", "euler", "spread", "cose-bilkent"
-    ]
-
-    # Ensure the provided layout is valid
-    if layout not in available_layouts:
-        logger.warning(f"Layout '{layout}' not recognized, defaulting to 'circle'")
-        layout = "circle"
-
-    # Initialize the Dash app
-    dash_app = dash.Dash(__name__, title="Dash Cytoscape Demo")
-
-    # Define the app layout
-    dash_app.layout = html.Div(
-        [
-            html.H1("Dash Cytoscape Network Visualization Demo"),
-            html.P(f"Visualizing NetworkX graph from: {graph_path}"),
-
-            # Layout selection dropdown
-            html.Div([
-                html.Label("Select Layout:"),
-                dcc.Dropdown(
-                    id="layout-dropdown",
-                    options=[{"label": l.capitalize(), "value": l} for l in available_layouts],
-                    value=layout,  # Use the layout from CLI parameter as default
-                    clearable=False,
-                    style={"width": "200px"}
-                )
-            ], style={"margin": "10px 0"}),
-
-            # Cytoscape component
-            cyto.Cytoscape(
-                id="cytoscape-network",
-                layout={"name": layout},  # Using layout from CLI parameter
-                style={"width": "100%", "height": "600px"},
-                elements=elements,
-                stylesheet=stylesheet,
-                boxSelectionEnabled=True,
-                autounselectify=False,
-            ),
-
-            # Display selected node info
-            html.Div(id="selected-node-info", style={"margin-top": "20px"}),
-        ]
+    from .dashboard import run_dashboard as run_dash
+    run_dash(
+        graph_path=graph_path,
+        layout=layout,
+        color_by=color_by,
+        debug=debug,
+        host=host,
+        port=port
     )
-
-    # Callback to display selected node information
-    @dash_app.callback(
-        Output("selected-node-info", "children"),
-        Input("cytoscape-network", "selectedNodeData")
-    )
-    def display_node_info(data_list):
-        """
-        Update the display when nodes are selected.
-
-        Parameters
-        ----------
-        data_list : list
-            List of data for all selected nodes
-
-        Returns
-        -------
-        str
-            HTML or text representing node information
-        """
-        if not data_list:
-            return "No nodes selected. Click on nodes to see details."
-
-        # Handle multiple selections
-        return [
-            html.H3(f"Selected Nodes: {len(data_list)}"),
-            html.Div([
-                html.Div([
-                    html.H4(f"Node: {node.get('label', node['id'])}"),
-                    html.P(f"ID: {node['id']}"),
-                    html.P(f"Properties: {', '.join([f'{k}: {v}' for k, v in node.items() if k != 'id'])}"),
-                    html.Hr()
-                ]) for node in data_list
-            ])
-        ]
-
-    @dash_app.callback(
-        Output("cytoscape-network", "layout"),
-        Input("layout-dropdown", "value")
-    )
-    def update_layout(layout_value):
-        """
-        Update the Cytoscape layout when dropdown selection changes.
-
-        Parameters
-        ----------
-        layout_value : str
-            Selected layout algorithm name
-
-        Returns
-        -------
-        dict
-            Layout configuration dictionary for Cytoscape
-        """
-        logger.info(f"Changing layout to: {layout_value}")
-        return {"name": layout_value}
-
-    # Run the app
-    logger.info(f"Starting Dash server on {host}:{port}")
-    dash_app.run_server(debug=debug, host=host, port=port)
 
 
 def main():
