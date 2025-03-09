@@ -200,6 +200,21 @@ def run_dashboard(
                 "color": "white",  # Label text color
             },
         },
+        # Style for selected nodes
+        {
+            "selector": "node:selected",
+            "style": {
+                "background-color": "#FF7700",  # Highlight color for selected nodes
+                "border-width": 3,
+                "border-color": "#FFD700",  # Gold border for selected nodes
+                "width": 40,  # Make selected nodes slightly larger
+                "height": 40,
+                "text-outline-color": "#000000",  # Text outline for better visibility
+                "text-outline-width": 1,
+                "font-size": 14,  # Larger font for selected nodes
+                "z-index": 10,  # Bring selected nodes to front
+            },
+        },
         # Style for all edges
         {
             "selector": "edge",
@@ -213,6 +228,16 @@ def run_dashboard(
                 "text-rotation": "autorotate",  # Auto-rotate text to follow edge
                 "text-margin-y": -10,  # Text margin
                 "color": "#555",  # Text color
+            },
+        },
+        # Style for edges connected to selected nodes
+        {
+            "selector": "node:selected ~ edge, edge[source = 'node:selected'], edge[target = 'node:selected']",
+            "style": {
+                "width": 3,  # Thicker edges for connections to selected nodes
+                "line-color": "#FFB6C1",  # Different color for edges connected to selected nodes
+                "target-arrow-color": "#FFB6C1",
+                "opacity": 1,  # Full opacity for selected connections
             },
         },
     ]
@@ -232,6 +257,8 @@ def run_dashboard(
                 style={"width": "100%", "height": "600px"},
                 elements=elements,
                 stylesheet=stylesheet,
+                boxSelectionEnabled=True,  # Enable box selection
+                autounselectify=False,     # Allow selection to be undone
             ),
             # Display selected node info
             html.Div(id="selected-node-info", style={"margin-top": "20px"}),
@@ -241,38 +268,36 @@ def run_dashboard(
     # Callback to display selected node information
     @dash_app.callback(
         Output("selected-node-info", "children"),
-        Input("cytoscape-network", "tapNodeData"),
+        Input("cytoscape-network", "selectedNodeData"),  # Changed from tapNodeData to selectedNodeData
     )
-    def display_node_info(data):
+    def display_node_info(data_list):
         """
-        Update the display when a node is clicked.
+        Update the display when nodes are selected.
 
         Parameters
         ----------
-        data : dict
-            Data of the clicked node
+        data_list : list
+            List of data for all selected nodes
 
         Returns
         -------
         str
             HTML or text representing node information
         """
-        if not data:
-            return "No node selected. Click on a node to see its details."
+        if not data_list:
+            return "No nodes selected. Click on nodes to see details."
 
-        # Display all node properties to show they were preserved
-        properties = []
-        for key, value in data.items():
-            if key != "id":  # Skip ID as it's displayed separately
-                properties.append(f"{key}: {value}")
-
-        property_display = (
-            ", ".join(properties) if properties else "No additional properties"
-        )
+        # Handle multiple selections
         return [
-            html.H3(f"Selected Node: {data.get('label', data['id'])}"),
-            html.P(f"ID: {data['id']}"),
-            html.P(f"Properties: {property_display}"),
+            html.H3(f"Selected Nodes: {len(data_list)}"),
+            html.Div([
+                html.Div([
+                    html.H4(f"Node: {node.get('label', node['id'])}"),
+                    html.P(f"ID: {node['id']}"),
+                    html.P(f"Properties: {', '.join([f'{k}: {v}' for k, v in node.items() if k != 'id'])}"),
+                    html.Hr()
+                ]) for node in data_list
+            ])
         ]
 
     # Run the app
