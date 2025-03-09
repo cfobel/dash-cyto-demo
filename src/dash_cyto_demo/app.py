@@ -10,10 +10,13 @@ import dash
 import dash_cytoscape as cyto
 import networkx as nx
 import typer
-from dash import html
-from dash.dependencies import Input, Output
+from dash import html, dcc
+from dash.dependencies import Input, Output, State
 from networkx.readwrite import cytoscape_data
 from networkx.readwrite.json_graph import node_link_data, node_link_graph
+
+# Load extra Cytoscape.js layouts
+cyto.load_extra_layouts()
 
 # Set up logging
 logging.basicConfig(
@@ -148,6 +151,7 @@ def run_dashboard(
     debug: bool = typer.Option(False, "--debug", help="Run server in debug mode"),
     port: int = typer.Option(8050, "--port", "-p", help="Port to run the server on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to run the server on"),
+    layout: str = typer.Option("circle", "--layout", "-l", help="Initial Cytoscape layout algorithm"),
 ):
     """
     Run Dash Cytoscape network visualization dashboard from a NetworkX graph.
@@ -242,6 +246,20 @@ def run_dashboard(
         },
     ]
 
+    # Available layouts in Cytoscape.js (including extra layouts loaded with cyto.load_extra_layouts())
+    available_layouts = [
+        # Default layouts
+        "circle", "grid", "random", "concentric",
+        "breadthfirst", "cose", "null",
+        # Extra layouts (require cyto.load_extra_layouts())
+        "dagre", "klay", "euler", "spread", "cose-bilkent"
+    ]
+
+    # Ensure the provided layout is valid
+    if layout not in available_layouts:
+        logger.warning(f"Layout '{layout}' not recognized, defaulting to 'circle'")
+        layout = "circle"
+
     # Initialize the Dash app
     dash_app = dash.Dash(__name__, title="Dash Cytoscape Demo")
 
@@ -250,16 +268,30 @@ def run_dashboard(
         [
             html.H1("Dash Cytoscape Network Visualization Demo"),
             html.P(f"Visualizing NetworkX graph from: {graph_path}"),
+
+            # Layout selection dropdown
+            html.Div([
+                html.Label("Select Layout:"),
+                dcc.Dropdown(
+                    id="layout-dropdown",
+                    options=[{"label": l.capitalize(), "value": l} for l in available_layouts],
+                    value=layout,  # Use the layout from CLI parameter as default
+                    clearable=False,
+                    style={"width": "200px"}
+                )
+            ], style={"margin": "10px 0"}),
+
             # Cytoscape component
             cyto.Cytoscape(
                 id="cytoscape-network",
-                layout={"name": "circle"},  # Using circle layout for simplicity
+                layout={"name": layout},  # Using layout from CLI parameter
                 style={"width": "100%", "height": "600px"},
                 elements=elements,
                 stylesheet=stylesheet,
-                boxSelectionEnabled=True,  # Enable box selection
-                autounselectify=False,     # Allow selection to be undone
+                boxSelectionEnabled=True,
+                autounselectify=False,
             ),
+
             # Display selected node info
             html.Div(id="selected-node-info", style={"margin-top": "20px"}),
         ]
@@ -268,7 +300,7 @@ def run_dashboard(
     # Callback to display selected node information
     @dash_app.callback(
         Output("selected-node-info", "children"),
-        Input("cytoscape-network", "selectedNodeData"),  # Changed from tapNodeData to selectedNodeData
+        Input("cytoscape-network", "selectedNodeData")
     )
     def display_node_info(data_list):
         """
@@ -299,6 +331,27 @@ def run_dashboard(
                 ]) for node in data_list
             ])
         ]
+
+    @dash_app.callback(
+        Output("cytoscape-network", "layout"),
+        Input("layout-dropdown", "value")
+    )
+    def update_layout(layout_value):
+        """
+        Update the Cytoscape layout when dropdown selection changes.
+
+        Parameters
+        ----------
+        layout_value : str
+            Selected layout algorithm name
+
+        Returns
+        -------
+        dict
+            Layout configuration dictionary for Cytoscape
+        """
+        logger.info(f"Changing layout to: {layout_value}")
+        return {"name": layout_value}
 
     # Run the app
     logger.info(f"Starting Dash server on {host}:{port}")
